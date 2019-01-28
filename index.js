@@ -1,49 +1,74 @@
-const cheerio = require('cheerio');
-const request = require('request');
+var cheerio = require('cheerio');
+var request = require('async-request');
+var github = require('octonode');
 
-const config = require('./config.json');
+var config = require('./config.json');
 
-const github = require('octonode');
-const client = github.client(config.token);
-const ghuser = client.user(config.username);
+var client = github.client(config.token);
+var ghuser = client.user(config.username);
 
-let lobsters = [];
-let githubFollowers = [];
+async function scrapeLobsters(){
+    var lobsters = [];
+    var response = await request('https://lobste.rs/u/');
+
+    var $ = cheerio.load(response.body);
+    $('ul li a').each(function(){
+        lobsters.push($(this).text());
+    });
+
+    return lobsters;
+}
 
 async function getFollowers(page = 1, previous = []) {
 	var [data] = await ghuser.followersAsync(page);
+    var users = [];
+
+    data.forEach(function(item){
+        users.push(item.login);
+    });
 
 	if (data && data.length === 0) {
 		return previous;
 	}
 
-	return previous.concat(await getFollowers(++page, data));
+	return previous.concat(await getFollowers(++page, users));
 }
 
 async function getFollowing(page = 1, previous = []) {
-	var [data] = await ghuser.followingAsync(page);
+    var [data] = await ghuser.followingAsync(page);
+    var users = [];
+
+    data.forEach(function(item){
+        users.push(item.login);
+    });
 
 	if (data && data.length === 0) {
 		return previous;
 	}
 
-	return previous.concat(await getFollowing(++page, data));
+	return previous.concat(await getFollowing(++page, users));
 }
 
-getFollowers()
-	.then(function(followers) {
-		console.log('total ->', followers.length);
-    }).then(getFollowing)
-    .then(function(following) {
-		console.log('total ->', following.length);
-    });
+var lobsters = [];
 
-// request('https://lobste.rs/u/', function (error, response, html) {
-//     if (!error && response.statusCode == 200) {
-//         const $ = cheerio.load(html);
-//         $('ul li a').each(function(i, element){
-//             const username = $(element).text();
-//             lobsters.push(username);
-//         });
-//     }
-// });
+scrapeLobsters()
+    .then(function(data){
+        lobsters = data;
+    }).then(getFollowers)
+    .then(function(data) {
+        var followers = data;
+        var matches = followers.filter(function(obj) { return lobsters.indexOf(obj) > -1; });
+        console.log('You (' + config.username + ') have ' + matches.length + ' followers on GitHub who might be able to invite you to https://lobste.rs');
+        if (matches.length > 0){
+                console.log('🦞  ' + matches.join('\n🦞  '));
+        }
+    })
+    .then(getFollowing)
+    .then(function(data) {
+        var following = data;
+        var matches = following.filter(function(obj) { return lobsters.indexOf(obj) > -1; });
+        console.log('You (' + config.username + ') have ' + matches.length + ' followings on GitHub who might be able to invite you');
+        if (matches.length > 0){
+            console.log('🦞  ' + matches.join('\n🦞  '));
+        }
+    });
